@@ -1,8 +1,6 @@
 """
 OpenFoodFacts product scraper with retry logic, image downloading,
 CSV export and category filtering.
-
-Used to collect a dataset of food products for machine learning tasks.
 """
 
 import csv
@@ -12,7 +10,7 @@ import os
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-BASE_URL = "https://world.openfoodfacts.org/category/{category}.json"
+API_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 HEADERS = {"User-Agent": "MyAwesomeApp/1.0"}
 
 TARGET_COUNT = 180
@@ -20,17 +18,12 @@ PAGE_SIZE = 100
 MAX_PAGES = 50
 CATEGORY = "champagnes"
 
+OUTPUT_DIR = "data"
 
-# --- Session with retry ---
+# -------------------------
+# Session with retry logic
+# -------------------------
 def create_session():
-    """
-    Creates a requests.Session configured with retry logic.
-
-    Returns
-    -------
-    requests.Session
-        Session object with retry strategy for robust API calls.
-    """
     session = requests.Session()
     retry = Retry(
         total=5,
@@ -47,55 +40,33 @@ def create_session():
 SESSION = create_session()
 
 
-def fetch_page(category, page, page_size):
-    """
-    Fetches a page of products from OpenFoodFacts.
-
-    Parameters
-    ----------
-    category : str
-        Product category to query.
-    page : int
-        Page index (starting at 1).
-    page_size : int
-        Number of products per page.
-
-    Returns
-    -------
-    list
-        List of product dictionaries.
-    """
-    url = BASE_URL.format(category=category)
-    params = {"page": page, "page_size": page_size, "json": 1}
+# -------------------------
+# API Fetching
+# -------------------------
+def fetch_products(category, page, page_size):
+    params = {
+        "action": "process",
+        "tagtype_0": "categories",
+        "tag_contains_0": "contains",
+        "tag_0": category,
+        "page": page,
+        "page_size": page_size,
+        "json": 1
+    }
 
     try:
-        response = SESSION.get(
-            url,
-            params=params,
-            headers=HEADERS,
-            timeout=(10, 30)
-        )
+        response = SESSION.get(API_URL, params=params, headers=HEADERS, timeout=(10, 30))
         response.raise_for_status()
         return response.json().get("products", [])
     except Exception as error:
-        print(f"⚠ Erreur API sur la page {page} :", error)
+        print(f"⚠ Erreur API page {page} :", error)
         return []
 
 
+# -------------------------
+# Product validation
+# -------------------------
 def get_best_image(product):
-    """
-    Selects the best available image URL for a product.
-
-    Parameters
-    ----------
-    product : dict
-        Product metadata from OpenFoodFacts.
-
-    Returns
-    -------
-    str or None
-        URL of the best available image.
-    """
     return (
         product.get("image_url")
         or product.get("image_front_url")
@@ -105,40 +76,13 @@ def get_best_image(product):
 
 
 def is_valid_product(product):
-    """
-    Checks whether a product contains the required fields.
-
-    Parameters
-    ----------
-    product : dict
-        Product metadata.
-
-    Returns
-    -------
-    bool
-        True if product is valid and has an image.
-    """
-    required_fields = ["_id", "product_name", "categories_tags"]
-    for field in required_fields:
-        if not product.get(field):
-            return False
+    required = ["_id", "product_name", "categories_tags"]
+    if not all(product.get(f) for f in required):
+        return False
     return bool(get_best_image(product))
 
 
 def extract_product_info(product):
-    """
-    Extracts relevant fields from a product.
-
-    Parameters
-    ----------
-    product : dict
-        Product metadata.
-
-    Returns
-    -------
-    list
-        Extracted fields: id, name, categories, ingredients, image_url.
-    """
     return [
         product.get("_id"),
         product.get("product_name"),
@@ -148,76 +92,51 @@ def extract_product_info(product):
     ]
 
 
-def save_to_csv(filename, rows):
-    """
-    Saves product rows to a CSV file.
+# -------------------------
+# Image download
+# -------------------------
+def download_image(url, image_id, folder="data/images"):
+    if not url:
+        return
 
-    Parameters
-    ----------
-    filename : str
-        Output CSV filename.
-    rows : list of list
-        Product rows to write.
-    """
-    with open(filename, "w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(
-            ["foodId", "label", "category", "foodContentsLabel", "image"]
-        )
-        writer.writerows(rows)
-
-
-def download_image(image_url, image_id, folder="images"):
-    """
-    Downloads an image from a URL and saves it locally.
-
-    Parameters
-    ----------
-    image_url : str
-        URL of the image.
-    image_id : str
-        Unique product ID used as filename.
-    folder : str, optional
-        Output folder for images.
-    """
     os.makedirs(folder, exist_ok=True)
 
-    ext = image_url.split(".")[-1].split("?")[0]
+    ext = url.split(".")[-1].split("?")[0]
     filename = os.path.join(folder, f"{image_id}.{ext}")
 
     if os.path.exists(filename):
         return
 
     try:
-        response = SESSION.get(
-            image_url,
-            headers=HEADERS,
-            timeout=(10, 30)
-        )
+        response = SESSION.get(url, headers=HEADERS, timeout=(10, 30))
         response.raise_for_status()
-
         with open(filename, "wb") as f:
             f.write(response.content)
-
     except Exception as error:
-        print(f"⚠ Impossible de télécharger l'image {image_url} :", error)
+        print(f"⚠ Impossible de télécharger {url} :", error)
 
 
-def main():
-    """
-    Main scraping loop:
-    - fetches pages of products
-    - filters valid entries
-    - downloads images
-    - saves metadata to CSV
-    """
+# -------------------------
+# CSV export
+# -------------------------
+def save_to_csv(filename, rows):
+    with open(filename, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["foodId", "label", "category", "foodContentsLabel", "image"])
+        writer.writerows(rows)
+
+
+# -------------------------
+# Main scraping loop
+# -------------------------
+def scrape_category(category, target_count, page_size, max_pages):
     valid_products = []
     page = 1
 
-    while len(valid_products) < TARGET_COUNT and page <= MAX_PAGES:
+    while len(valid_products) < target_count and page <= max_pages:
         print(f"→ Téléchargement page {page}…")
 
-        products = fetch_page(CATEGORY, page, PAGE_SIZE)
+        products = fetch_products(category, page, page_size)
         if not products:
             print("Aucun produit trouvé sur cette page.")
             break
@@ -231,19 +150,22 @@ def main():
                 image_id = info[0]
                 download_image(image_url, image_id)
 
-            if len(valid_products) == TARGET_COUNT:
-                break
+                if len(valid_products) >= target_count:
+                    break
 
         page += 1
         time.sleep(0.3)
 
-    output_file = f"{CATEGORY}_{TARGET_COUNT}.csv"
-    save_to_csv(output_file, valid_products)
+    return valid_products
 
-    print(
-        f"✔ Fichier {output_file} créé. "
-        f"Produits valides collectés : {len(valid_products)}"
-    )
+
+def main():
+    products = scrape_category(CATEGORY, TARGET_COUNT, PAGE_SIZE, MAX_PAGES)
+
+    output_file = f"{OUTPUT_DIR}/metadata_{CATEGORY}_{TARGET_COUNT}.csv"
+    save_to_csv(output_file, products)
+
+    print(f"✔ Fichier {output_file} créé. Produits valides collectés : {len(products)}")
 
 
 if __name__ == "__main__":
