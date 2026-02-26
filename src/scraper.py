@@ -95,7 +95,7 @@ def extract_product_info(product):
 # -------------------------
 # Image download
 # -------------------------
-def download_image(url, image_id, folder="data/images"):
+def download_image(url, image_id, folder="data/images/{CATEGORY}"):
     if not url:
         return
 
