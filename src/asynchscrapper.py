@@ -9,7 +9,7 @@ HEADERS = {"User-Agent": "MyAwesomeApp/1.0"}
 
 OUTPUT_DIR = "data"
 
-CATEGORY = "bread"# "milk", "champagnes", "butter" 
+CATEGORY = "sugar" #"bread", "milk", "champagnes", "butter" 
 TARGET_COUNT = 180
 PAGE_SIZE = 100
 MAX_PAGES = 50
@@ -74,7 +74,7 @@ async def fetch_page(session, category, page, page_size, sem):
 # -------------------------
 # Async image download
 # -------------------------
-async def download_image(session, url, image_id, sem, folder="data/images/bread"):
+async def download_image(session, url, image_id, sem, folder="data/images/sugar"):
     if not url:
         return
 
